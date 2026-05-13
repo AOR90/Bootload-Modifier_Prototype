@@ -8,7 +8,7 @@ Bootload Modifier (BLM) is a cross-platform bootloader management tool that lets
 
 ## 🧾 Overview
 
-Bootload Modifier (BLM) is a system utility designed to simplify bootloader management through a modern graphical interface. It provides fine-grained control over boot entries across multiple operating systems, while maintaining safety through backups, validation, and a structured execution model.
+Bootload Modifier (BLM) is a system utility designed to simplify bootloader management through a modern graphical interface. It provides fine-grained control over boot entries across multiple operating systems while maintaining safety through backups, validation, and a structured execution model.
 
 The tool is built for advanced users who work with multi-boot environments and need reliable control over boot configuration systems such as GRUB, systemd-boot, and Windows Boot Manager.
 
@@ -56,7 +56,7 @@ This tool is intended for experienced users only. Incorrect usage may affect sys
 * Two-panel layout (entries + details)
 * Settings panel for configuration
 * Live status and logging view
-* Responsive and minimal design for clarity
+* Minimal and responsive design
 
 ---
 
@@ -82,16 +82,56 @@ This tool is intended for experienced users only. Incorrect usage may affect sys
 
 ## 📦 Installation / Usage
 
-### Demo Mode (Safe)
+### 🪟 Windows
+
+#### 🔧 Build executable (recommended)
+
+If `build.bat` is included in the project:
+
+```bat
+build.bat
+```
+
+This will:
+
+* Install required dependencies (if needed)
+* Build the project using PyInstaller
+* Output a standalone executable in the `dist/` folder
+
+Run the program:
+
+```bash
+dist\BootloadModifier.exe
+```
+
+> ⚠️ For full functionality (Windows Boot Manager / BCD access), run as **Administrator**.
+
+#### 🧪 Demo Mode (safe, no system changes)
 
 ```bash
 python blm.py --demo
 ```
 
-### Linux (Real Mode)
+#### ⚙️ Developer Mode (run from source)
 
 ```bash
-sudo python blm.py
+python blm.py
+```
+
+---
+
+### 🐧 Linux
+
+#### 🧪 Demo Mode
+
+```bash
+python3 blm.py --demo
+```
+
+#### ⚙️ Real Mode
+
+```bash
+sudo python3 blm.py
 ```
 
 ---
@@ -104,7 +144,7 @@ Contributions, issues, and pull requests are welcome. This project is under acti
 
 ## 🔥 Project Status
 
-Prototype stage — functional core system with active development and ongoing backend migration toward C++.
+Prototype stage — functional core system with active development and ongoing migration toward a full C++ backend.
 
 ________________________________________
 If needed, this can be further refined into a production-level GitHub README or expanded into full developer documentation.
