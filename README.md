@@ -145,6 +145,3 @@ Contributions, issues, and pull requests are welcome. This project is under acti
 ## 🔥 Project Status
 
 Prototype stage — functional core system with active development and ongoing migration toward a full C++ backend.
-
-________________________________________
-If needed, this can be further refined into a production-level GitHub README or expanded into full developer documentation.
