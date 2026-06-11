@@ -1,0 +1,558 @@
+# Bootload Modifier — Full Change Log
+
+> Complete record of everything built, fixed, and changed across all development sessions.
+
+---
+
+## Project Overview
+
+Bootload Modifier (BLM) is a cross-platform boot entry manager.
+It lets advanced users and IT professionals safely view, rename, delete, reorder,
+and change the default boot entry across GRUB2, systemd-boot, Windows BCD, and macOS
+— without touching config files manually.
+
+**Total codebase: ~5,000 lines** (excluding `third_party/`)
+
+---
+
+## File Inventory
+
+### Python app (runs today — zero external dependencies beyond pygame)
+
+| File | Lines | Purpose |
+|---|---|---|
+| `python/blm.py` | 98 | Entry point — pygame GUI by default, `--browser` for HTTP GUI |
+| `python/backend.py` | 1203 | All bootloader backends + undo system |
+| `python/server.py` | 345 | HTTP API server (browser GUI, `--browser` flag) |
+| `python/gui.html` | 1269 | Complete browser GUI |
+| `python/gui_pygame.py` | 805 | pygame Nuklear-style GUI (default) |
+| `python/gui_fltk.py` | 705 | FLTK native GUI (Windows/macOS prebuilt wheel) |
+| `python/run.bat` | — | Windows: auto-installs pygame, launches GUI |
+| `python/run.sh` | — | Linux/macOS: same |
+| `python/build.bat` | — | Windows: build `dist/BootloadModifier.exe` via PyInstaller |
+| `python/build.sh` | — | Linux/macOS: same |
+
+### C++ backend (compiles and runs on Linux and Windows)
+
+| File | Lines | Status |
+|---|---|---|
+| `cpp/include/BootEntry.hpp` | 91 | ✅ Done |
+| `cpp/include/IBootBackend.hpp` | 91 | ✅ Done |
+| `cpp/include/BackendBridge.hpp` | 79 | ✅ Done |
+| `cpp/include/Backup.hpp` | 46 | ✅ Done |
+| `cpp/include/Logger.hpp` | 36 | ✅ Done |
+| `cpp/include/PlatformDetector.hpp` | 47 | ✅ Done |
+| `cpp/include/backends/Grub2Backend.hpp` | 79 | ✅ Done |
+| `cpp/include/backends/SystemdBootBackend.hpp` | 58 | ✅ Done |
+| `cpp/include/backends/WindowsBcdBackend.hpp` | 55 | ✅ Done |
+| `cpp/include/backends/MacOSBackend.hpp` | 58 | ✅ Done |
+| `cpp/CMakeLists.txt` | 91 | ✅ Done |
+| `cpp/src/backends/Grub2Backend.cpp` | 436 | ✅ Done |
+| `cpp/src/backends/SystemdBootBackend.cpp` | 267 | ✅ Done |
+| `cpp/src/backends/WindowsBcdBackend.cpp` | 349 | ✅ Done |
+| `cpp/src/backends/MacOSBackend.cpp` | 157 | ✅ Done |
+| `cpp/src/PlatformDetector.cpp` | 122 | ✅ Done |
+| `cpp/src/BackendBridge.cpp` | 257 | ✅ Done |
+| `cpp/src/utils/Logger.cpp` | 73 | ✅ Done |
+| `cpp/src/utils/Backup.cpp` | 102 | ✅ Done |
+| `cpp/src/main.cpp` | 244 | ✅ Done |
+
+---
+
+## Current Status
+
+| Component | Windows | Linux | macOS |
+|---|---|---|---|
+| Python pygame GUI | ✅ | ✅ | ✅ |
+| Python browser GUI | ✅ | ✅ | ✅ |
+| Python FLTK GUI | ✅ (prebuilt wheel) | ⚠ manual build | ✅ (prebuilt wheel) |
+| C++ Nuklear GUI | ✅ Tested | ✅ | — |
+| C++ ImGui GUI | ✅ builds | ✅ | — |
+| C++ backend | ✅ Tested (Windows BCD) | ✅ (GRUB2, systemd-boot) | — |
+| Windows BCD backend | ✅ Real entries load/display | — | — |
+| GRUB2 backend | — | ✅ | — |
+| systemd-boot backend | — | ✅ | — |
+| Undo (all operations) | ✅ | ✅ | — |
+| Demo mode | ✅ | ✅ | ✅ |
+| Stress tests (123 tests) | ✅ | ✅ | — |
+
+---
+
+## Session 1 — Python App (Initial Release)
+
+### Core architecture
+- Three-layer design: browser GUI → HTTP API server → bootloader backend
+- `IBootBackend` abstract interface with `(ok, value)` result tuple pattern
+- `PlatformDetector` — detects OS and active bootloader at startup, auto-selects backend
+- `Backup` utility — timestamped config copies saved before every write operation
+- `Logger` utility — append-only timestamped operation log (`blm.log`)
+- `MockBackend` — full in-memory demo backend with 7 realistic boot entries
+- Undo stack — every write operation pushes a precise reversal lambda (up to 10 deep)
+- Settings persistence — preferences saved to `settings.json`, restored on every launch
+
+### GRUB2 backend
+- Parses `/boot/grub/grub.cfg` and `/boot/grub2/grub.cfg` (Fedora/RHEL)
+- `set_default` — writes `GRUB_DEFAULT`, runs `grub-mkconfig` or `grub2-mkconfig`
+- `delete_entry` — removes BLM-managed snippets; explains why auto-generated entries cannot be deleted
+- Guards against deletion of the current default entry
+
+### systemd-boot backend
+- Scans `/boot/loader/entries/*.conf`
+- `set_default` — rewrites `default=` line with backup
+- `delete_entry` — removes `.conf` file with backup
+- `rename_entry` — edits `title=` line in place with backup and undo
+
+### Windows BCD backend
+- `list_entries` — parses `bcdedit /enum ALL /v` output; reads display order from Boot Manager block
+- Handles Windows Boot Loader, Windows Boot Sector, Resume from Hibernate
+- `set_default`, `delete_entry`, `rename_entry`, `move_entry` — all via bcdedit with undo
+- UAC elevation detection with clear human-readable error
+
+### macOS backend
+- Apple Silicon detection at init; read-only on Apple Silicon
+- Intel: `bless --setBoot` (partial implementation)
+
+### HTTP API server
+- All endpoints bound to `127.0.0.1` — never network-accessible
+- Full endpoint list: `/api/info`, `/api/entries`, `/api/log`, `/api/undo-info`,
+  `/api/settings`, `/api/ready`, `/api/set-default`, `/api/delete`, `/api/rename`,
+  `/api/move`, `/api/rescan`, `/api/undo`, `/api/quit`
+- `winUpdatePending` detection via Windows registry `RebootRequired` key
+- Port conflict handling — tries 7373–7382
+- `SIGINT` / `SIGBREAK` signal handling for clean Ctrl+C on Windows and Linux
+
+### Browser GUI
+- Four tabs: Boot Entries, Platform Support, Settings, Log
+- Color-coded entry tags; green left border on default entry
+- Full entry detail panel; dark mode; XSS protection; toast notifications
+
+### Bug fixes (Session 1 — 18 fixes)
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | Checkbox could not be unchecked after first click | Toggle-deselect + `stopPropagation` on checkbox |
+| 2 | Windows BCD returned empty list silently when not elevated | Clear error message with step-by-step instructions |
+| 3 | Disclaimer shown once ever — never appeared again | Added Settings toggle to re-enable or permanently disable |
+| 4 | Boot list not refreshed on launch — manual rescan required | Backend pre-scans on startup; GUI polls `/api/ready` before loading |
+| 5 | Ctrl+C did not cleanly stop the server on Windows | `signal.SIGINT` + `SIGBREAK` handlers with `finally` block |
+| 6 | BCD `move_entry` returned "not yet implemented" | Implemented via `bcdedit /displayorder` with full reordered GUID list |
+| 7 | BCD parser missed display order and some entry types | Reads `displayorder` from Boot Manager block; handles Boot Sector and Hibernate |
+| 8 | No way to undo a change | Full undo stack — every write pushes a precise undo lambda; GUI button label shows what will be undone |
+| 9 | No warning when Windows Update reboot was pending | Registry check; amber warning banner shown at top of app |
+| 10 | Browser tab title never changed | Updates to show selected entry name; resets on deselect |
+| 11 | Stale detail panel shown after rescan removed selected entry | Rescan deselects cleanly if entry no longer exists |
+| 12 | Status line showed stale count after Apply | Status driven by real undo stack state, not a click counter |
+| 13 | Hard crash if port 7373 was in use | Tries ports 7373–7382; prints which port was bound |
+| 14 | No confirmation dialog before changing the default boot entry | Confirmation dialog added; controlled by same toggle as delete |
+| 15 | Settings reset to defaults on every restart | Persisted to `settings.json`; loaded on every launch with corrupt-file fallback |
+| 16 | BCD delete/rename had no undo support | `rename_entry` pushes proper undo; `delete_entry` pushes honest irreversible explanation |
+| 17 | Mock backend delete/rename had no undo | Both push precise undo lambdas — full undo coverage in demo mode |
+| 18 | Pending change count was a cosmetic click counter | Replaced with `_hasChanges` driven by real undo stack via `/api/undo-info` |
+
+---
+
+## Session 2 — C++ Backend (Initial Implementation)
+
+Complete C++20 rewrite of the Python backend. All four bootloader backends,
+platform detector, JSON IPC bridge, logger, backup, and main entry point.
+
+### Bug fixes (Session 2 — 12 fixes)
+
+| # | Problem | Fix |
+|---|---|---|
+| 19 | C++ backend crashed with "no bootloader detected" without root | Added `--demo` / `-d` flag and `MockBackend` in `main.cpp` |
+| 20 | `PlatformDetector::isAppleSilicon()` used unreliable path proxy | Replaced with `uname()` checking `machine == "arm64"` |
+| 21 | `PlatformDetector::commandExists()` always used `which` — not valid on Windows | Uses `where` on Windows, `command -v` on Unix |
+| 22 | `PlatformDetector::osName()` had no else branch — uninitialised return | Added explicit `return "Unknown"` fallback |
+| 23 | `Logger` and `Backup` used `getenv("HOME")` only — wrong path on Windows | Added `SHGetFolderPathA(CSIDL_APPDATA)` on Windows; falls back to `temp_directory_path()` |
+| 24 | `Backup::save()` and `list()` propagated `std::filesystem` exceptions uncaught | Wrapped in `try/catch`; errors returned as `Result::fail` |
+| 25 | `Backup::list()` manual `.bak` suffix check was off-by-one prone | Replaced with `std::string::ends_with()` (C++20) |
+| 26 | `BackendBridge::dispatch()` silently ignored requests with no `action` field | Now writes an error response immediately |
+| 27 | `BackendBridge` `quit` called `std::exit(0)` mid-loop — bypassed destructors and log flush | Changed to `std::cin.setstate(eofbit)` for clean loop exit |
+| 28 | `BackendBridge::jsonGet()` did not handle whitespace after `:` or escaped quotes | Rewritten to skip whitespace and step over `\"` sequences |
+| 29 | `Logger::timestamp()` used `char buf[32]` with `strftime` — potential UB | Replaced with `std::ostringstream` + `std::put_time` |
+| 30 | Uploaded `.cpp` files used `src/` include paths but were placed flat — include resolution failed | Restructured into `src/`, `src/backends/`, `src/utils/` |
+
+---
+
+## Session 3 — Project Organisation
+
+| # | Problem | Fix |
+|---|---|---|
+| 31 | No `run.bat` / `run.sh` launch scripts | Added `python/run.bat` and `python/run.sh`; `run.sh` warns when not root without `--demo` |
+| 32 | No `build.bat` / `build.sh` for the C++ backend | Added `cpp/build.bat` (checks `cl`, `g++`, `clang++`) and `cpp/build.sh` (parallel via `nproc`) |
+| 33 | Project was a flat dump with no folder separation | Reorganised into `python/` and `cpp/` subdirectories; all paths and scripts updated |
+
+---
+
+## Session 4 — Classic OpenGL 2.1 Renderer Variant
+
+Added `blm-gui-classic` build target using `imgui_impl_opengl2` instead of
+`imgui_impl_opengl3`. Runs on old integrated GPUs, VMs (VirtualBox, QEMU,
+old VMware), and systems with GL 2.1 only. Identical features to the modern variant —
+only the renderer backend differs.
+
+**Build:** `./build.sh --classic` (or `build.bat --classic`)
+
+### Bug fixes (Session 4)
+
+| # | Problem | Fix |
+|---|---|---|
+| 32 | `IMGUI_IMPL_OPENGL_LOADER_CUSTOM` disabled ImGui's bundled GL loader — hundreds of undefined symbols | Removed the define; `imgui_impl_opengl3_loader.h` is self-sufficient |
+| 33 | No way to run the GUI on hardware that does not support OpenGL 3.3 | Added `blm-gui-classic` target using `imgui_impl_opengl2` |
+| 34 | `GLFW_OPENGL_FORWARD_COMPAT` hint included unconditionally — invalid under GL 2.1 | Moved inside `#ifndef BLM_CLASSIC` block |
+
+---
+
+## Session 5 — Stress Testing, Round 1 (65 tests)
+
+Headless test harness (`stress_test.cpp`) spawning real `blm-backend` processes
+and communicating over pipes using the same JSON IPC protocol as the GUI — zero mocking.
+
+| Category | Tests |
+|---|---|
+| JSON parser edge cases | 14 |
+| Backend lifecycle | 8 |
+| Entry operations (success + every error path) | 14 |
+| State consistency | 5 |
+| Rapid-fire stress | 5 |
+| Edge cases | 9 |
+| IpcClient JSON builder | 6 |
+| Concurrency | 2 |
+| Performance | 2 |
+
+### Bug fixes (Session 5)
+
+| # | File | Problem | Fix |
+|---|---|---|---|
+| 35 | `cpp/src/main.cpp` | `MockBackend::setDefault` returned `ok:true` for non-existent entry IDs — silently corrupted mock state | Added existence check |
+| 36 | `cpp/src/main.cpp` | `MockBackend::moveEntry` accepted `delta=0` silently | Added `if (delta == 0) return fail` |
+| 37 | `cpp/src/BackendBridge.cpp` | `jsonGetInt` returned `0` both for a missing `delta` field and `"delta":0` | Changed sentinel to `-999`; write error if `-999` |
+| 38 | `stress_test.cpp` | `Backend::stop()` closed read pipe before write pipe — classic deadlock | Reversed order: close write end first, then drain read end |
+| 39 | `stress_test.cpp` | `RUN_TEST` macro used non-variadic form, failed on MSVC | Changed to variadic `(name, ...)` / `__VA_ARGS__` |
+| 40 | `stress_test.cpp` | Missing `#include <fcntl.h>` — `O_WRONLY` undeclared | Added include |
+
+---
+
+## Session 6 — Windows Build Fixes and Setup Script
+
+### `setup_windows.bat` — new one-click Windows setup
+1. Auto-detects Visual Studio and calls `vcvars64.bat`
+2. Checks for CMake; prints download URL if missing
+3. Installs vcpkg to `C:\vcpkg` if not already there
+4. Installs `glfw3:x64-windows` via vcpkg
+5. Builds `blm-backend.exe` and `blm-gui.exe`; copies both to `run\`
+6. Offers to launch in demo mode immediately
+
+### Bug fixes (Session 6)
+
+| # | Problem | Fix |
+|---|---|---|
+| 41 | `find_package(PkgConfig REQUIRED)` hard-fails on Windows — `pkg-config` does not exist in MSVC/vcpkg environments | Platform-aware GLFW detection: `find_package(glfw3 CONFIG REQUIRED)` on Windows, `pkg_check_modules` on Linux/macOS |
+| 42 | `::` comments fail in PowerShell; wrong relative paths; `build.bat` not found | Added `setup_windows.bat` which handles everything from the correct directory |
+
+---
+
+## Session 7 — FLTK Native GUI for the Python App
+
+Native-window GUI using **pyFLTK** (Python bindings for FLTK), calling `backend.py`
+directly in-process — no HTTP server, no browser, no port:
+
+```
+gui_fltk.py  →  backend.py  →  system bootloader
+```
+
+Features: scrollable entry list, detail panel, all actions with undo, Platform tab,
+Settings tab, Log tab, demo banner, status bar, dark theme, button state management.
+
+**Prebuilt wheels:** Windows (Python 3.11–3.14) and macOS (Python 3.10–3.13).
+Linux requires a manual build; `run.sh` automatically falls back to the browser GUI
+on Linux if no wheel is present.
+
+---
+
+## Session 8 — Nuklear + SDL2 GUI (C++)
+
+`blm-gui-nuklear` — a second C++ GUI target using Nuklear (single-header immediate-mode UI)
+and SDL2 (window + input + renderer).
+
+- Fixed memory arena — zero heap allocation during render loop
+- SDL2 software renderer fallback — no dedicated GPU required
+- **Binary size:** 475 KB stripped (vs 1003 KB for Dear ImGui on Linux x86_64)
+- Full features: all four tabs, entry list with colour-coded labels, detail panel,
+  all actions, confirm and rename popups, dark theme
+
+### Bug fix (Session 8)
+
+| # | Problem | Fix |
+|---|---|---|
+| 43 | `doUndo()` called non-existent `IpcClient::send()` and `IpcClient::nextId()` | Replaced with `ipc.rescan()` |
+
+---
+
+## Session 9 — Stress Testing, Round 2 (58 tests)
+
+Second harness (`stress_test2.cpp`) covering 18 additional categories including
+IPC threading model, JSON injection, disconnect under load, large payloads,
+response ordering, fuzz, moveEntry boundaries, delete cascade, and throughput.
+
+**Combined: 123 tests. All passing. ~92,000 IPC ops/second.**
+
+### Bug fixes (Session 9)
+
+| # | File | Problem | Fix |
+|---|---|---|---|
+| 44 | `stress_test2.cpp` | Null-byte injection test: `fgets` truncated response at embedded null | Changed crash-safety check to use `rescan` + `backendInfo` |
+| 45 | `stress_test2.cpp` | Batch-mode tests accessed private `m_toChild` / `m_fpRead` directly | Added public `sendRaw()` and `readLine()` accessor methods |
+
+---
+
+## Session 10 — Full Audit and Verification
+
+All 6 previously-identified open bugs confirmed fixed in prior sessions.
+All 4 C++ targets rebuilt from scratch: zero errors, zero warnings.
+123/123 tests passing.
+
+---
+
+## Session 11 — systemd-boot `move_entry`, GRUB2 Error Message
+
+**systemd-boot `move_entry` implemented.** Reorders entries by renaming `.conf` files
+with numeric prefixes (`10_stem.conf`, `20_stem.conf`, …). Two-phase rename via
+`.blm_tmp` intermediates avoids collisions when swapping adjacent entries.
+Full undo lambda restores all filenames and the default. All boundary conditions
+handled with clear error messages.
+
+**GRUB2 `move_entry` error message improved.** Now explains specifically why
+auto-generated entries cannot be reordered, names the target entry, recommends
+`Set Default` as the correct tool, and mentions `GRUB_DEFAULT=<index>` as an alternative.
+
+---
+
+## Session 12 — Windows SDL2 Without vcpkg: `build_novcpkg.bat`
+
+vcpkg raised "No access" even running as Administrator due to antivirus/ACL restrictions.
+
+`gui-nuklear/build_novcpkg.bat` — now the recommended Windows build path. No admin
+rights required. Downloads `SDL2-devel-2.32.0-VC.zip` (~6 MB) from GitHub releases
+using PowerShell's `Invoke-WebRequest`; falls back to `%USERPROFILE%\SDL2` if
+`C:\SDL2` is not writable. Builds both `blm-backend.exe` and `blm-gui-nuklear.exe`.
+
+---
+
+## Session 13 — pygame Nuklear-style GUI (New Default)
+
+Native-window GUI for the Python app using **pygame**. Becomes the new default
+GUI mode (`--browser` uses the old browser GUI).
+
+Mirrors all browser GUI features: four tabs, entry list with color-coded tags,
+detail panel, all actions, confirm dialogs, demo mode banner, dark theme, toast
+notifications, settings persistence.
+
+---
+
+## Sessions 14–24 — Platform Fixes and IpcClient Stability
+
+### Python backend (Sessions 14 and 24)
+
+| # | File | Problem | Fix |
+|---|---|---|---|
+| 46 | `python/server.py` | Duplicate `_settings_path` / `_load_settings` / `_save_settings` definitions | Removed duplicates |
+| 47 | `python/gui_pygame.py` | Unguarded index access in confirm modals | Added bounds checks |
+| 60 | `python/backend.py` | `move_entry` missing `delta=0` validation in all 4 Python backends | Added validation to all backends |
+| 61 | `python/backend.py` | `WindowsBcdBackend.list_entries` used `shell=True` — codepage issues | Replaced with direct array form + `encoding="utf-8", errors="replace"` |
+| 62 | `python/backend.py` | `_parse_bcdedit` did not strip `\r` from bcdedit output — invisible trailing carriage returns in entry names | Added `output.replace("\r\n", "\n")` at parse entry |
+| 63 | `python/server.py` | Duplicate `/api/settings` GET handler — dead code | Removed duplicate `elif` branch |
+| 64 | `python/gui_pygame.py` | Click detection fired for off-screen entries when list was scrolled | Added `if ry >= 0:` guard |
+
+### C++ platform guards (Session 15)
+
+| # | File | Problem | Fix |
+|---|---|---|---|
+| 48 | `cpp/src/backends/Grub2Backend.cpp` | `unistd.h` included unconditionally — missing Windows guard | Added `#ifdef __unix__` guard |
+| 49 | `cpp/src/backends/MacOSBackend.cpp` | `popen`/`pclose` used without platform guard | Added `#ifdef __APPLE__` guard |
+| 50 | `cpp/src/utils/Backup.cpp` + `Logger.cpp` | `localtime` deprecated on MSVC | Replaced with `localtime_s` on MSVC |
+
+### IpcClient stability (Sessions 16–23)
+
+| # | File | Problem | Fix |
+|---|---|---|---|
+| 51 | `IpcClient.hpp` | `windows.h` defines `min`/`max` macros — clobbered `std::min`/`std::max` | Added `#define NOMINMAX` before `windows.h` |
+| 52 | `gui-nuklear/src/main.cpp` | `nk_layout_space_push` incompatible with outer row — buttons off-screen | Replaced with `nk_layout_row_dynamic` |
+| 53 | `gui-nuklear/src/main.cpp` | `nk_layout_row_dynamic` wrapper consumed all height — `drawEntriesTab` never ran | Fixed chrome calculation (header 26px, tab bar 28px, status 20px) |
+| 54 | `IpcClient.hpp` | `poll()` held `m_cbMutex` while calling callbacks — deadlock on any IPC action | Moved mutex unlock before callback invocation |
+| 55 | `IpcClient.hpp` | Unquoted exe path in `CreateProcessA` — spaces in folder name caused silent failure | Wrapped path in double quotes |
+| 56 | `gui-nuklear/src/main.cpp` | No startup timeout — loading spinner never cleared on backend failure | Added 5-second timeout; shows error message |
+| 57 | `IpcClient.hpp` | Python escaping mangled quotes in `CreateProcessA` cmd string | Fixed escape handling |
+| 58 | `IpcClient.hpp` | Windows `ReadFile` buffer 4096 bytes — BCD responses larger, partial reads, no callbacks | Increased to 65536 bytes; added accumulation loop |
+| 59 | `IpcClient.hpp` | `ipcParseEntries` used `find('}')` — BCD GUIDs contain `}`, truncating every entry | Replaced with newline-delimited field parsing |
+
+---
+
+## Session 25 — Build System Cleanup
+
+- Removed stale scripts: `stress/build_and_run.sh`, `python/run_fltk.bat`, `python/run_fltk.sh`
+- `cpp/CMakeLists.txt` — removed unused `LINUX_SOURCES` / `WINDOWS_SOURCES` / `MACOS_SOURCES` variables
+- `gui/CMakeLists.txt` — removed redundant explicit `opengl32` link (transitively provided by `OpenGL::GL`)
+- `gui-nuklear/build_novcpkg.bat` — removed `CMAKE_BUILD_TYPE=Release` from MSVC configure step
+  (multi-config generator ignores it at configure time; caused spurious "unused variable" warning)
+
+---
+
+## Session 26 — C++ Nuklear GUI: Full Polish Pass
+
+| # | Issue | Fix |
+|---|---|---|
+| 1 | Log box too cramped — lines overlap | `LOG_H = H - BTN_H - 8`; renders only as many lines as fit |
+| 2 | Click offset: had to click below an entry to select it | Replaced `nk_label` + manual bounds check with `nk_selectable_label` |
+| 3 | Settings tab had only one checkbox — Python version has more | Added "Create backups" checkbox, demo mode notice, log/backup path display |
+| 4 | "Clear" button above log box — should be below | Render log group first, then Clear button row |
+| 5 | Rescan and Set Default button order swapped | Order: Rescan · Set Default · Rename · Up · Down · Undo · Delete |
+| 6 | Rename, Set Default, Up, Down, Undo buttons did not work | `nk_layout_row(NK_STATIC, …, bw)` with manual widths caused zero-width buttons; fixed with `nk_layout_row_dynamic` |
+| 7 | Buttons too large; not proportional to label length | `nk_layout_row_dynamic(BTN_H, 7)` distributes width evenly |
+| 8 | Delete button has no visual distinction | Delete styled with `C_RED` background |
+| 9 | Edges not clean | Reduced padding; separator line via `nk_rule_horizontal` |
+
+Other improvements: per-row colour applied correctly, selected row highlight,
+log line colouring (`[ERROR]` in red, `[gui]` in dim grey, `[OK]` in green),
+mouse wheel scroll on the entry list, two-column template layout in detail and platform panels.
+
+---
+
+## Session 27 — Buttons Greyed Out + Settings Tab Incomplete
+
+### Bug 65 — Up/Down/Rename buttons greyed out due to writable race condition
+
+**File:** `gui-nuklear/src/main.cpp`
+
+`doRefresh()` fires `listEntries` and `backendInfo` simultaneously. `listEntries`
+responds first — the user sees entries and immediately tries to click Up/Down/Rename
+— but `backendInfo` has not yet fired, so `app.writable` is still `false`.
+All buttons requiring `canWrite` are greyed.
+
+**Fix:** When `listEntries` succeeds and entries are non-empty, immediately set
+`app.writable = true`. The `backendInfo` callback confirms or corrects the value
+when it arrives.
+
+### Settings tab — fully populated
+
+Added four sections matching the Python version:
+- **Behaviour** — confirm dialogs checkbox (wired)
+- **Mode** — live vs demo indicator, privilege status
+- **File paths** — log file path, backups path (platform-aware)
+- **Backend** — backend name and kind from `backendInfo` callback
+
+---
+
+## Session 28 — Unicode Rendering Fix, Detail Panel Polish
+
+### Bug 66 — Unicode symbols render as `?` on Windows
+
+Nuklear's built-in bitmap font covers ASCII 32–127 only. Characters outside
+that range (★, ⚠, 🔒) render as `?`.
+
+**Fix:** Replaced all Unicode symbols in Nuklear-rendered strings with ASCII equivalents:
+
+| Was | Now |
+|---|---|
+| `★` (default marker in list) | `[default]` |
+| `⚠` (read-only label) | `[read-only]` |
+| `★  Current default boot entry` | `Default boot entry` |
+| `⚠  Read-only` | `Read-only — cannot be modified` |
+
+### Detail panel improvements
+- Horizontal rule between name and field rows
+- Label column widened from 90px to 100px
+- Status badges in their own section below a separator; hidden when none apply
+- Field row height increased from 18px to 20px
+
+---
+
+## Complete Bug Index
+
+| # | Session | File | Description |
+|---|---|---|---|
+| 1 | 1 | `gui.html` | Checkbox could not be unchecked after first click |
+| 2 | 1 | `backend.py` | BCD returned empty list silently when not elevated |
+| 3 | 1 | `gui.html` | Disclaimer shown once ever — never appeared again |
+| 4 | 1 | `server.py` | Boot list not refreshed on launch — manual rescan required |
+| 5 | 1 | `server.py` | Ctrl+C did not cleanly stop the server on Windows |
+| 6 | 1 | `backend.py` | BCD `move_entry` returned "not yet implemented" |
+| 7 | 1 | `backend.py` | BCD parser missed display order and some entry types |
+| 8 | 1 | `backend.py` | No way to undo a change |
+| 9 | 1 | `server.py` | No warning when Windows Update reboot was pending |
+| 10 | 1 | `gui.html` | Browser tab title never changed |
+| 11 | 1 | `server.py` | Stale detail panel shown after rescan removed selected entry |
+| 12 | 1 | `gui.html` | Status line showed stale count after Apply |
+| 13 | 1 | `server.py` | Hard crash if port 7373 was in use |
+| 14 | 1 | `gui.html` | No confirmation dialog before changing the default boot entry |
+| 15 | 1 | `server.py` | Settings reset to defaults on every restart |
+| 16 | 1 | `backend.py` | BCD delete/rename had no undo support |
+| 17 | 1 | `backend.py` | Mock backend delete/rename had no undo |
+| 18 | 1 | `gui.html` | Pending change count was a cosmetic click counter |
+| 19 | 2 | `cpp/src/main.cpp` | C++ backend crashed without root when no bootloader detected |
+| 20 | 2 | `cpp/src/PlatformDetector.cpp` | `isAppleSilicon()` used unreliable path proxy |
+| 21 | 2 | `cpp/src/PlatformDetector.cpp` | `commandExists()` always used `which` — invalid on Windows |
+| 22 | 2 | `cpp/src/PlatformDetector.cpp` | `osName()` had no else branch — uninitialised return |
+| 23 | 2 | `cpp/src/utils/` | Logger and Backup used `getenv("HOME")` only — wrong on Windows |
+| 24 | 2 | `cpp/src/utils/Backup.cpp` | Filesystem exceptions propagated uncaught |
+| 25 | 2 | `cpp/src/utils/Backup.cpp` | `.bak` suffix check was off-by-one prone |
+| 26 | 2 | `cpp/src/BackendBridge.cpp` | Requests with no `action` field silently ignored |
+| 27 | 2 | `cpp/src/BackendBridge.cpp` | `quit` called `std::exit(0)` — bypassed destructors and log flush |
+| 28 | 2 | `cpp/src/BackendBridge.cpp` | `jsonGet()` did not handle whitespace after `:` or escaped quotes |
+| 29 | 2 | `cpp/src/utils/Logger.cpp` | `timestamp()` potential UB with fixed-size buffer |
+| 30 | 2 | `cpp/src/` | Files used wrong include paths — include resolution failed |
+| 31 | 3 | — | No `run.bat` / `run.sh` launch scripts |
+| 32 | 3 | — | No C++ build scripts |
+| 33 | 3 | — | Project was a flat dump with no folder separation |
+| 34 | 4 | `gui/CMakeLists.txt` | `IMGUI_IMPL_OPENGL_LOADER_CUSTOM` disabled ImGui's GL loader |
+| 35 | 5 | `cpp/src/main.cpp` | `MockBackend::setDefault` succeeded for non-existent IDs — silently corrupted state |
+| 36 | 5 | `cpp/src/main.cpp` | `MockBackend::moveEntry` accepted `delta=0` |
+| 37 | 5 | `cpp/src/BackendBridge.cpp` | `jsonGetInt` returned `0` for both absent field and explicit `"delta":0` |
+| 38 | 5 | `stress_test.cpp` | `Backend::stop()` pipe close ordering — deadlock |
+| 39 | 5 | `stress_test.cpp` | `RUN_TEST` macro — non-variadic form failed on MSVC |
+| 40 | 5 | `stress_test.cpp` | Missing `#include <fcntl.h>` |
+| 41 | 6 | `cpp/CMakeLists.txt` | Missing `BLM_PLATFORM_WINDOWS` define |
+| 42 | 6 | `gui-nuklear/CMakeLists.txt` | SDL2 not found on first configure |
+| 43 | 8 | `gui-nuklear/src/main.cpp` | `doUndo()` called non-existent `IpcClient` methods |
+| 44 | 9 | `stress/stress_test2.cpp` | Null-byte injection test: `fgets` truncated response at embedded null |
+| 45 | 9 | `stress/stress_test2.cpp` | Batch-mode tests accessed private members directly |
+| 46 | 14 | `python/server.py` | Duplicate `_settings_path`/`_load_settings`/`_save_settings` definitions |
+| 47 | 14 | `python/gui_pygame.py` | Unguarded index access in confirm modals |
+| 48 | 15 | `cpp/src/backends/Grub2Backend.cpp` | `unistd.h` included without Windows guard |
+| 49 | 15 | `cpp/src/backends/MacOSBackend.cpp` | `popen`/`pclose` used without platform guard |
+| 50 | 15 | `cpp/src/utils/` | `localtime` deprecated on MSVC |
+| 51 | 16 | `IpcClient.hpp` | `windows.h` `min`/`max` macros clobbered `std::min`/`std::max` |
+| 52 | 17 | `gui-nuklear/src/main.cpp` | Layout mixing — buttons off-screen |
+| 53 | 18 | `gui-nuklear/src/main.cpp` | `nk_layout_row_dynamic` consumed all height before `drawEntriesTab` ran |
+| 54 | 19 | `IpcClient.hpp` | Mutex held while calling callbacks — deadlock on Rescan/any action |
+| 55 | 20 | `IpcClient.hpp` | Unquoted exe path — spaces in folder name caused silent failure |
+| 56 | 20 | `gui-nuklear/src/main.cpp` | No startup timeout — loading spinner never cleared on backend failure |
+| 57 | 21 | `IpcClient.hpp` | Python escaping mangled quotes in `CreateProcessA` cmd string |
+| 58 | 22 | `IpcClient.hpp` | `ReadFile` buffer 4096 bytes — BCD responses caused partial reads |
+| 59 | 23 | `IpcClient.hpp` | `find('}')` in GUID parsing — BCD GUIDs contain `}`, truncating every entry |
+| 60 | 24 | `python/backend.py` | `move_entry` missing `delta=0` validation in all 4 Python backends |
+| 61 | 24 | `python/backend.py` | `WindowsBcdBackend.list_entries` used `shell=True` — codepage issues |
+| 62 | 24 | `python/backend.py` | `_parse_bcdedit` did not strip `\r` from bcdedit output |
+| 63 | 24 | `python/server.py` | Duplicate `/api/settings` GET handler |
+| 64 | 24 | `python/gui_pygame.py` | Click detection fired for off-screen entries when list was scrolled |
+| 65 | 27 | `gui-nuklear/src/main.cpp` | `writable=false` until `backendInfo` callback fires — race caused buttons to be greyed |
+| 66 | 28 | `gui-nuklear/src/main.cpp` | Unicode symbols rendered as `?` by Nuklear's ASCII-only bitmap font |
+
+---
+
+## Test Results
+
+```
+Round 1  (stress_test):   65 /  65 passed
+Round 2  (stress_test2):  58 /  58 passed
+                        ─────────────────
+TOTAL:                   123 / 123 passed — ALL PASSED ✓
+
+Throughput:  ~92,000 IPC ops/second
+Latency:     <2ms average per request
+```
+
+---
+
+*Last updated: 11.06.2026
