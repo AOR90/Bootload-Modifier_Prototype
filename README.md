@@ -41,8 +41,9 @@ syntax or risking a typo in a config file.
 The project ships in two layers:
 
 **Python app** — fully functional today, runs on any machine with Python 3.8+.
-Offers three GUI modes: a native pygame window (default), a browser-based GUI
-(`--browser`), and an optional FLTK native window (`gui_fltk.py`).
+Offers two GUI modes: a native FLTK window (default on Windows and macOS) and
+a browser-based GUI (`--browser`, no pyFLTK needed). The browser GUI is the
+fallback on Linux where no prebuilt pyFLTK wheel is available.
 
 **C++ stack** — a compiled C++20 backend (`blm-backend`) that communicates with two
 native GUI frontends (Dear ImGui and Nuklear+SDL2) over a JSON IPC protocol.
@@ -56,7 +57,7 @@ every write, and a full undo stack.
 
 ## What Works Where
 
-| Feature | Python pygame | Python browser | C++ ImGui | C++ Nuklear |
+| Feature | Python (FLTK) | Python (browser) | C++ ImGui | C++ Nuklear |
 |---|---|---|---|---|
 | List entries | ✅ | ✅ | ✅ | ✅ |
 | Set default | ✅ | ✅ | ✅ | ✅ |
@@ -86,9 +87,10 @@ every write, and a full undo stack.
 
 ```
 +---------------------------------------+
-|   pygame / FLTK / Nuklear / ImGui     |  Python or C++ native window
-|   OR                                  |
-|   Browser GUI  (gui.html)             |  http://localhost:7373
+|   FLTK native window                  |  Python (default — Windows / macOS)
+|   OR Nuklear + SDL2 window            |  C++
+|   OR Dear ImGui + OpenGL window       |  C++
+|   OR Browser GUI  (gui.html)          |  http://localhost:7373  (--browser)
 +------------------+--------------------+
                    | In-process calls (Python)
                    | JSON IPC on stdin/stdout (C++)
@@ -136,14 +138,13 @@ every write, and a full undo stack.
 ```
 bootload-modifier/
 │
-├── python/                   Python app — runs today, pip install pygame
+├── python/                   Python app — runs today, pip install pyFLTK
 │   ├── blm.py                Entry point
 │   ├── backend.py            All bootloader backends + undo system (1203 lines)
 │   ├── server.py             HTTP API server (browser GUI, --browser flag)
 │   ├── gui.html              Browser-based GUI (1269 lines)
-│   ├── gui_pygame.py         pygame Nuklear-style GUI (default, 805 lines)
-│   ├── gui_fltk.py           FLTK native GUI (Windows/macOS prebuilt wheel)
-│   ├── run.bat / run.sh      Launch — auto-installs pygame if missing
+│   ├── gui_fltk.py           FLTK native GUI (default on Windows / macOS)
+│   ├── run.bat / run.sh      Launch — auto-installs pyFLTK if missing
 │   └── build.bat / build.sh  Build standalone executable via PyInstaller
 │
 ├── cpp/                      C++ IPC backend (blm-backend)
@@ -166,7 +167,8 @@ bootload-modifier/
 │   ├── src/IpcClient.hpp
 │   ├── third_party/nuklear/
 │   ├── CMakeLists.txt
-│   ├── build.sh              Linux / macOS
+│   ├── build_linux.sh        Linux one-click build (auto-installs SDL2)
+│   ├── build.sh              Linux / macOS manual build
 │   ├── build.bat             Windows (vcpkg SDL2)
 │   └── build_novcpkg.bat     Windows — downloads SDL2 zip, no admin needed
 │
@@ -178,6 +180,7 @@ bootload-modifier/
 ├── setup_windows.bat         Full Windows C++ toolchain setup (one-click)
 ├── diagnose_windows.bat      System diagnostic for Windows build issues
 ├── CHANGES.md                Complete implementation history and all bug fixes
+├── EXPLANATION.md            Plain-language guide to the project decisions
 └── README.md                 This file
 ```
 
@@ -189,24 +192,23 @@ bootload-modifier/
 
 ### Python — easiest, runs today, zero build step
 
-**Windows**
+**Windows / macOS**
 ```bat
-pip install pygame
-python\run.bat
+pip install pyFLTK
+python\run.bat          # Windows
+./python/run.sh         # macOS
 ```
-Right-click → *Run as administrator* for write access to boot entries.
+On Windows, right-click → *Run as administrator* for write access to boot entries.
 Pass `--demo` for safe testing without admin rights.
 
-**Linux / macOS**
+**Linux**
 ```bash
-pip3 install pygame
+# No prebuilt pyFLTK wheel on Linux — use the browser GUI instead
 chmod +x python/run.sh
 ./python/run.sh --demo      # safe, no root needed
 sudo ./python/run.sh        # real mode
+# (falls back automatically to --browser if pyFLTK is not installed)
 ```
-
-The default GUI is a native pygame window.
-Pass `--browser` to use the browser-based GUI instead (no pygame needed).
 
 ---
 
@@ -215,12 +217,12 @@ Pass `--browser` to use the browser-based GUI instead (no pygame needed).
 ### Run from source
 
 ```bash
-# Install the one dependency (prebuilt wheel — no compiler needed)
-pip install pygame
+# Install the one dependency (prebuilt wheel — no compiler needed on Windows/macOS)
+pip install pyFLTK
 
 # Launch
-python blm.py               # pygame GUI  (native window, default)
-python blm.py --browser     # browser GUI (opens in your browser)
+python blm.py               # FLTK GUI   (native window, default)
+python blm.py --browser     # browser GUI (opens in your browser, no pyFLTK)
 python blm.py --demo        # demo mode   (no root, no writes to disk)
 python blm.py --help        # all options
 ```
@@ -234,7 +236,7 @@ REM Output: python\dist\BootloadModifier.exe
 ```
 
 ```bash
-# Linux / macOS
+# macOS
 cd python && ./build.sh
 # Output: python/dist/BootloadModifier
 ```
@@ -242,40 +244,46 @@ cd python && ./build.sh
 ### Features
 
 - Auto-detection of bootloader on startup (GRUB2, systemd-boot, Windows BCD, macOS)
-- View all boot entries with color-coded labels showing type and status
+- View all boot entries with `[default]` and `[ro]` tags
 - Change default boot entry with confirmation dialog
 - Rename entries — with full undo
 - Delete old entries — with guards and undo support
 - Reorder entries — with undo
 - Full undo stack — every write operation records a precise reversal
-- Settings persistence — preferences saved to disk, restored on every launch
+- Settings persistence — saved to disk, restored on every launch
 - Demo mode — full GUI, realistic mock data, nothing written to disk
 - Automatic backup before every write (`~/.config/bootload-modifier/backups/`)
 - Windows Update warning — detects a pending reboot and warns before changes
 - Operation log at `~/.config/bootload-modifier/blm.log`
-- Dark mode — follows your OS preference automatically
+- Dark theme
 - Port conflict handling — tries ports 7373–7382 if default is in use
 
-### GUI overview
+### FLTK GUI overview
 
-The **Boot Entries** tab is the main view. Entries are color-coded:
+The FLTK GUI has 3 tabs: **Boot Entries**, **Settings**, **Log**.
+
+The **Boot Entries** tab is the main view. Entry tags use plain ASCII:
 
 | Tag | Meaning |
 |---|---|
-| `default` | Current default boot target — green left border |
-| `fallback` | Fallback initramfs entry |
-| `old distro` | Different kernel version than the current default |
-| `read-only` | Cannot be modified (UEFI firmware entries, Apple Silicon) |
+| `[default]` | Current default boot target |
+| `[ro]` | Read-only — cannot be modified |
 
-The **Settings** tab persists all preferences across restarts:
+Button order (all equal-width, filling the full window width):
+`Rescan | Set Default | Rename | Up | Down | Undo | Delete`
 
-| Setting | Default | Description |
-|---|---|---|
-| Backup before changes | On | Saves config to backups/ before every write |
-| Show technical metadata | On | UUID, config paths in entry details |
-| Confirm before changes | On | Confirmation dialog before set-default and delete |
-| Demo mode | Off | Mock data — no real writes to disk |
-| Show disclaimer on launch | On | Risk disclaimer on first launch |
+The **Settings** tab has four sections:
+
+| Section | Contents |
+|---|---|
+| General Settings | Confirm dialogs • Create backups • Show technical metadata |
+| Mode & Status | Live vs demo indicator; privilege status (write access / run as admin) |
+| File Paths | Log file path; backups path (platform-aware) |
+| Backend & Platform | Backend name and kind; full bootloader support matrix |
+
+All settings are saved automatically and restored on every launch.
+A **Reset to defaults** button at the bottom of the Settings tab restores all three
+checkboxes to their default state.
 
 ---
 
@@ -289,28 +297,37 @@ Three binaries. Place all three in the same directory to run.
 | `blm-gui` | `gui/` | Dear ImGui + OpenGL 3.3 GUI |
 | `blm-gui-nuklear` | `gui-nuklear/` | Nuklear + SDL2 GUI (no GPU required) |
 
+The C++ Nuklear GUI matches the FLTK GUI feature-for-feature: 3 tabs
+(Boot Entries, Settings, Log), 3 settings checkboxes, Reset button,
+detail panel respects the "Show technical metadata" toggle.
+
 ### Linux / macOS
 
+**One-click build (recommended):**
+```bash
+chmod +x gui-nuklear/build_linux.sh
+./gui-nuklear/build_linux.sh
+# Auto-installs SDL2 via apt/dnf/pacman/brew, builds both binaries, puts them in run/
+./run/blm-gui-nuklear --demo    # no root
+sudo ./run/blm-gui-nuklear      # real mode
+```
+
+**Manual build:**
 ```bash
 # 1. Build the backend (no external deps)
 cd cpp && ./build.sh
 
-# 2a. Nuklear GUI — recommended (lighter, no GPU needed)
+# 2a. Nuklear GUI
 #     Ubuntu/Debian: sudo apt install libsdl2-dev
 #     Fedora:        sudo dnf install SDL2-devel
 #     macOS:         brew install sdl2
 cd ../gui-nuklear && ./build.sh
 
-# 2b. ImGui GUI — alternative
+# 2b. ImGui GUI (alternative — needs OpenGL)
 #     Ubuntu/Debian: sudo apt install libglfw3-dev libgl-dev
 #     macOS:         brew install glfw
 cd ../gui && ./build.sh             # OpenGL 3.3 core (modern)
-cd ../gui && ./build.sh --classic   # OpenGL 2.1 (old GPUs, VMs, ancient drivers)
-
-# Copy backend next to GUI, then run
-cp cpp/build/blm-backend gui-nuklear/build/
-./gui-nuklear/build/blm-gui-nuklear --demo    # no root
-sudo ./gui-nuklear/build/blm-gui-nuklear      # real mode
+cd ../gui && ./build.sh --classic   # OpenGL 2.1 (old GPUs, VMs)
 ```
 
 ### Windows
@@ -402,6 +419,7 @@ after multi-step sequences, rapid-fire stress, concurrency, and latency benchmar
 | macOS Intel `bless` | ⚠️ Stub | Needs Mac hardware for full implementation |
 | macOS Apple Silicon | ⚠️ Read-only | Sealed by design |
 | C++ Undo IPC action | ⚠️ Partial | Backend has full undo stack; GUI Undo triggers rescan instead of true undo |
+| pyFLTK on Linux | ⚠️ No prebuilt wheel | Requires manual build with SWIG 4.1 + libfltk1.3-dev; `run.sh` falls back to `--browser` automatically |
 | Packaging installers | ⚠️ Future | .deb, .rpm, AppImage, NSIS, .dmg |
 | Config diff viewer | ⚠️ Future | Show exact changes before applying |
 
@@ -410,20 +428,23 @@ after multi-step sequences, rapid-fire stress, concurrency, and latency benchmar
 ## Changelog
 
 See [`CHANGES.md`](CHANGES.md) for the complete implementation history, including
-all 32+ bug fixes across all sessions, session-by-session feature additions, and
+all 67 bug fixes across 34 sessions, session-by-session feature additions, and
 detailed root cause analyses for every significant issue.
 
-**Summary of major additions since initial release:**
+**Major additions since initial release:**
 
-- Python app now defaults to a native pygame GUI (no browser required)
-- FLTK native GUI added as a third Python GUI option
-- Full C++ backend implemented and tested on Linux and Windows
-- Two C++ GUI frontends: Dear ImGui (OpenGL 3.3) and Nuklear+SDL2
-- OpenGL 2.1 classic renderer variant added for old GPUs and VMs
-- 123-test headless stress suite with zero mocking
-- `setup_windows.bat` — one-click Windows C++ toolchain setup
-- `diagnose_windows.bat` — Windows build diagnostic tool
-- 32+ bugs fixed across Python and C++ layers (full index in CHANGES.md)
+- FLTK native GUI replaces pygame as the default Python GUI
+- pygame fully removed from the codebase
+- C++ Nuklear GUI brought to full parity with the FLTK GUI (3 tabs, 3 settings
+  checkboxes, Reset button, metadata toggle in detail panel)
+- Platform tab merged into Settings tab across all GUIs
+- `build_linux.sh` — one-click Linux build script with auto-SDL2 install
+- Bug 67 fixed: FLTK support matrix showed garbage text on Windows (dangling
+  pointer from temporary Python strings passed to `Fl_Box`)
+- 67 bugs fixed total (full index in CHANGES.md)
+
+Also see [`EXPLANATION.md`](EXPLANATION.md) for a plain-language guide to the
+project's design decisions, the hardest problems encountered, and key numbers.
 
 ---
 
@@ -434,7 +455,7 @@ detailed root cause analyses for every significant issue.
 - Linux AppImage, .deb, .rpm
 - macOS .dmg
 - GRUB2 entry reordering via /etc/grub.d/ script prefix numbering
-- systemd-boot entry reordering via filename rename
+- systemd-boot entry reordering already implemented
 - macOS Intel — full bless implementation
 - UEFI variable editing via efibootmgr
 - Multiple undo steps shown in a history panel
@@ -472,14 +493,15 @@ python3 blm.py --demo     # test in demo mode first
 - Packaging (AppImage, Flatpak, Homebrew, NSIS)
 - Automated Python test suite for backend logic
 - Full macOS Intel `bless` implementation
+- pyFLTK Linux wheel (would remove the last platform gap in the Python GUI)
 
 ---
 
 ## Project Status
 
-Active development. Fully functional Python core with three GUI options.
-C++ stack compiles and runs on Linux and Windows with two native GUI frontends.
-**123/123 stress tests passing.**
+Active development. Fully functional Python core with FLTK native GUI (Windows/macOS)
+and browser GUI (Linux fallback). C++ stack compiles and runs on Linux and Windows
+with two native GUI frontends. **123/123 stress tests passing.**
 
 Total codebase: ~5,000 lines (excluding `third_party/`)
 
@@ -489,5 +511,4 @@ Total codebase: ~5,000 lines (excluding `third_party/`)
 
 GPL-3.0 — see LICENSE file.
 
-Built with Python 3.8+, zero external Python dependencies for the core runnable version.
-C++ backend targets C++20 with CMake 3.20+.
+Built with Python 3.8+. C++ backend targets C++20 with CMake 3.20+.
