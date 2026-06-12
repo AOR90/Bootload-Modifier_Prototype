@@ -17,18 +17,17 @@ and change the default boot entry across GRUB2, systemd-boot, Windows BCD, and m
 
 ## File Inventory
 
-### Python app (runs today — zero external dependencies beyond pygame)
+### Python app (runs today — `pip install pyFLTK` on Windows / macOS)
 
 | File | Lines | Purpose |
 |---|---|---|
-| `python/blm.py` | 98 | Entry point — pygame GUI by default, `--browser` for HTTP GUI |
+| `python/blm.py` | ~100 | Entry point — FLTK GUI by default, `--browser` for HTTP GUI |
 | `python/backend.py` | 1203 | All bootloader backends + undo system |
 | `python/server.py` | 345 | HTTP API server (browser GUI, `--browser` flag) |
 | `python/gui.html` | 1269 | Complete browser GUI |
-| `python/gui_pygame.py` | 805 | pygame Nuklear-style GUI (default) |
-| `python/gui_fltk.py` | 705 | FLTK native GUI (Windows/macOS prebuilt wheel) |
-| `python/run.bat` | — | Windows: auto-installs pygame, launches GUI |
-| `python/run.sh` | — | Linux/macOS: same |
+| `python/gui_fltk.py` | ~750 | FLTK native GUI (default on Windows / macOS) |
+| `python/run.bat` | — | Windows: auto-installs pyFLTK, launches GUI |
+| `python/run.sh` | — | Linux/macOS: same; falls back to `--browser` on Linux |
 | `python/build.bat` | — | Windows: build `dist/BootloadModifier.exe` via PyInstaller |
 | `python/build.sh` | — | Linux/macOS: same |
 
@@ -63,9 +62,8 @@ and change the default boot entry across GRUB2, systemd-boot, Windows BCD, and m
 
 | Component | Windows | Linux | macOS |
 |---|---|---|---|
-| Python pygame GUI | ✅ | ✅ | ✅ |
-| Python browser GUI | ✅ | ✅ | ✅ |
 | Python FLTK GUI | ✅ (prebuilt wheel) | ⚠ manual build | ✅ (prebuilt wheel) |
+| Python browser GUI | ✅ | ✅ | ✅ |
 | C++ Nuklear GUI | ✅ Tested | ✅ | — |
 | C++ ImGui GUI | ✅ builds | ✅ | — |
 | C++ backend | ✅ Tested (Windows BCD) | ✅ (GRUB2, systemd-boot) | — |
@@ -189,8 +187,7 @@ platform detector, JSON IPC bridge, logger, backup, and main entry point.
 
 Added `blm-gui-classic` build target using `imgui_impl_opengl2` instead of
 `imgui_impl_opengl3`. Runs on old integrated GPUs, VMs (VirtualBox, QEMU,
-old VMware), and systems with GL 2.1 only. Identical features to the modern variant —
-only the renderer backend differs.
+old VMware), and systems with GL 2.1 only.
 
 **Build:** `./build.sh --classic` (or `build.bat --classic`)
 
@@ -236,7 +233,7 @@ and communicating over pipes using the same JSON IPC protocol as the GUI — zer
 
 ## Session 6 — Windows Build Fixes and Setup Script
 
-### `setup_windows.bat` — new one-click Windows setup
+### `setup_windows.bat` — one-click Windows C++ setup
 1. Auto-detects Visual Studio and calls `vcvars64.bat`
 2. Checks for CMake; prints download URL if missing
 3. Installs vcpkg to `C:\vcpkg` if not already there
@@ -253,7 +250,7 @@ and communicating over pipes using the same JSON IPC protocol as the GUI — zer
 
 ---
 
-## Session 7 — FLTK Native GUI for the Python App
+## Session 7 — FLTK Native GUI for the Python App (First Version)
 
 Native-window GUI using **pyFLTK** (Python bindings for FLTK), calling `backend.py`
 directly in-process — no HTTP server, no browser, no port:
@@ -261,9 +258,6 @@ directly in-process — no HTTP server, no browser, no port:
 ```
 gui_fltk.py  →  backend.py  →  system bootloader
 ```
-
-Features: scrollable entry list, detail panel, all actions with undo, Platform tab,
-Settings tab, Log tab, demo banner, status bar, dark theme, button state management.
 
 **Prebuilt wheels:** Windows (Python 3.11–3.14) and macOS (Python 3.10–3.13).
 Linux requires a manual build; `run.sh` automatically falls back to the browser GUI
@@ -273,7 +267,7 @@ on Linux if no wheel is present.
 
 ## Session 8 — Nuklear + SDL2 GUI (C++)
 
-`blm-gui-nuklear` — a second C++ GUI target using Nuklear (single-header immediate-mode UI)
+`blm-gui-nuklear` — second C++ GUI target using Nuklear (single-header immediate-mode UI)
 and SDL2 (window + input + renderer).
 
 - Fixed memory arena — zero heap allocation during render loop
@@ -340,14 +334,10 @@ using PowerShell's `Invoke-WebRequest`; falls back to `%USERPROFILE%\SDL2` if
 
 ---
 
-## Session 13 — pygame Nuklear-style GUI (New Default)
+## Session 13 — pygame Nuklear-style GUI
 
-Native-window GUI for the Python app using **pygame**. Becomes the new default
-GUI mode (`--browser` uses the old browser GUI).
-
-Mirrors all browser GUI features: four tabs, entry list with color-coded tags,
-detail panel, all actions, confirm dialogs, demo mode banner, dark theme, toast
-notifications, settings persistence.
+Native-window GUI for the Python app using **pygame**. Became the default GUI mode
+at this point (`--browser` for the old browser GUI).
 
 ---
 
@@ -405,7 +395,7 @@ notifications, settings persistence.
 |---|---|---|
 | 1 | Log box too cramped — lines overlap | `LOG_H = H - BTN_H - 8`; renders only as many lines as fit |
 | 2 | Click offset: had to click below an entry to select it | Replaced `nk_label` + manual bounds check with `nk_selectable_label` |
-| 3 | Settings tab had only one checkbox — Python version has more | Added "Create backups" checkbox, demo mode notice, log/backup path display |
+| 3 | Settings tab had only one checkbox | Added "Create backups" checkbox, demo mode notice, log/backup path display |
 | 4 | "Clear" button above log box — should be below | Render log group first, then Clear button row |
 | 5 | Rescan and Set Default button order swapped | Order: Rescan · Set Default · Rename · Up · Down · Undo · Delete |
 | 6 | Rename, Set Default, Up, Down, Undo buttons did not work | `nk_layout_row(NK_STATIC, …, bw)` with manual widths caused zero-width buttons; fixed with `nk_layout_row_dynamic` |
@@ -423,10 +413,8 @@ mouse wheel scroll on the entry list, two-column template layout in detail and p
 
 ### Bug 65 — Up/Down/Rename buttons greyed out due to writable race condition
 
-**File:** `gui-nuklear/src/main.cpp`
-
 `doRefresh()` fires `listEntries` and `backendInfo` simultaneously. `listEntries`
-responds first — the user sees entries and immediately tries to click Up/Down/Rename
+responds first — the user sees entries and immediately tries to click a button
 — but `backendInfo` has not yet fired, so `app.writable` is still `false`.
 All buttons requiring `canWrite` are greyed.
 
@@ -434,13 +422,8 @@ All buttons requiring `canWrite` are greyed.
 `app.writable = true`. The `backendInfo` callback confirms or corrects the value
 when it arrives.
 
-### Settings tab — fully populated
-
-Added four sections matching the Python version:
-- **Behaviour** — confirm dialogs checkbox (wired)
-- **Mode** — live vs demo indicator, privilege status
-- **File paths** — log file path, backups path (platform-aware)
-- **Backend** — backend name and kind from `backendInfo` callback
+Settings tab expanded to four sections matching the Python version:
+Behaviour, Mode, File paths, Backend.
 
 ---
 
@@ -448,23 +431,215 @@ Added four sections matching the Python version:
 
 ### Bug 66 — Unicode symbols render as `?` on Windows
 
-Nuklear's built-in bitmap font covers ASCII 32–127 only. Characters outside
-that range (★, ⚠, 🔒) render as `?`.
+Nuklear's built-in bitmap font covers ASCII 32–127 only.
 
-**Fix:** Replaced all Unicode symbols in Nuklear-rendered strings with ASCII equivalents:
+**Fix:** Replaced all Unicode symbols with ASCII equivalents:
 
 | Was | Now |
 |---|---|
-| `★` (default marker in list) | `[default]` |
+| `★` (default marker) | `[default]` |
 | `⚠` (read-only label) | `[read-only]` |
-| `★  Current default boot entry` | `Default boot entry` |
-| `⚠  Read-only` | `Read-only — cannot be modified` |
 
-### Detail panel improvements
-- Horizontal rule between name and field rows
-- Label column widened from 90px to 100px
-- Status badges in their own section below a separator; hidden when none apply
-- Field row height increased from 18px to 20px
+Detail panel: horizontal rule between name and fields, label column widened to 100px,
+status badges in their own section, field row height increased to 20px.
+
+---
+
+## Session 29 — Python pygame GUI: Parity with C++ Nuklear GUI
+
+Four changes bringing the pygame GUI in line with the C++ Nuklear GUI polished in
+sessions 26–28.
+
+- **Button order** standardised: `Rescan | Set Default | Rename | Up | Down | Undo | Delete`
+- **Button sizing** changed to equal-width filling the available row width
+- **Entry list labels** replaced Unicode with ASCII: `✦` → `[default]`, `🔒` → `[ro]`
+- **Detail panel** improvements matching C++ session 28 fix (separator, wider label column,
+  status badges in separate section, ASCII badge text)
+- **Settings tab** expanded to four sections identical to C++ version
+- **Log tab** Clear button moved below log box; log lines colour-coded
+
+---
+
+## Session 30 — FLTK GUI Overhaul + pygame Retired
+
+### Decision: FLTK is now the default Python GUI
+
+pygame GUI (`gui_pygame.py`) kept for reference but no longer the default.
+`blm.py` now defaults to the FLTK GUI.
+
+Reasons: FLTK is a proper native widget toolkit using OS-native controls;
+pyFLTK has prebuilt wheels for Windows and macOS; pygame requires a full
+game-library stack for what is essentially a form-based tool; FLTK renders
+crisper, more professional-looking UI on all platforms.
+
+### FLTK GUI fixes (4 issues from photo review)
+
+#### 1. Set Default button — correctly enabled when an entry is selected
+
+All 7 buttons now use a single `style(btn, enabled, color)` helper that sets
+both `color()` and `labelcolor()` consistently. Previously Set Default's enabled
+state was not updating on selection change.
+
+#### 2. Log tab — Clear button below log box; font size increased
+
+Log box fills `h - BTN_H - GAP*2` pixels; Clear button sits below at `y + log_h + GAP`.
+Log text font size increased from 11 to 13.
+
+#### 3. Settings tab — full sections implemented
+
+Old: one checkbox + two static lines.
+New: four sections: GENERAL SETTINGS, MODE & STATUS, FILE PATHS, BACKEND & PLATFORM.
+
+**GENERAL SETTINGS:** 3 checkboxes — Confirm dialogs, Create backups, Show technical metadata.
+
+**MODE & STATUS:** Live/demo shown in green/amber; privilege status (write access confirmed /
+run as Administrator/root). Both lines live-updated on every refresh.
+
+**FILE PATHS:** Log and backups paths, platform-aware (`%APPDATA%` on Windows,
+`~/.config` on Linux/macOS).
+
+**BACKEND & PLATFORM:** Backend name, kind, and full support matrix table
+(GRUB2, systemd-boot, Windows BCD, macOS).
+
+#### 4. Platform tab removed — merged into Settings
+
+Tab count reduced from 4 to 3: Boot Entries | Settings | Log.
+
+### Other improvements
+
+- `[default]` and `[ro]` tags in entry list (ASCII, no Unicode)
+- All 7 action buttons equal-width, filling the full window width
+- Window size increased to 980×660 for better readability
+- Duplicate placeholder button creation removed
+
+---
+
+## Session 31 — pygame Fully Removed, FLTK Button Sizing Fix
+
+### FLTK button sizing fix
+
+Remainder pixels from integer division now distributed to left-most buttons
+so the row fills exactly to the window edge with no gap. Font size increased
+from 12px to 13px across all action buttons. Undo label truncated to 12 characters
+(was 18) to always fit cleanly within the button width.
+
+### pygame completely removed
+
+| File | Action |
+|---|---|
+| `python/gui_pygame.py` | Deleted |
+| `python/BootloadModifier.spec` | Deleted |
+| `python/BootloadModifier-FLTK.spec` | Deleted |
+| `python/__pycache__/` | Deleted |
+
+Scripts updated to replace pygame with pyFLTK references throughout:
+`run.bat`, `run.sh`, `build.bat`, `build.sh`, `README.md`.
+
+**Verification:** 0 pygame references remain in `python/` or `README.md`.
+
+---
+
+## Session 32 — Audit: FLTK Settings Tab Verification
+
+Line-by-line audit confirmed all settings features are fully implemented and correct.
+
+### Settings tab — confirmed working (3 checkboxes, all wired and persisted)
+
+| Setting | Implemented | Persisted | Effect |
+|---|---|---|---|
+| Confirm before Set Default and Delete | ✅ | ✅ disk | Dialog shown before destructive ops |
+| Create backups before writing changes | ✅ | ✅ disk | Backend creates timestamped backups |
+| Show technical metadata in entry details | ✅ | ✅ disk | Toggles Kernel/UUID/Partition/Config in detail panel |
+
+Settings saved to `settings.json` on every toggle; reloaded on next launch.
+
+### Action button sizing (confirmed from session 31)
+
+At WIN_W=980, gap=4: `base_bw = (980 - 24) // 7 = 136`; remainder=4 distributed
+to buttons 0–3 (137px each); buttons 4–6 are 136px. Row fills exactly 980px.
+
+---
+
+## Session 33 — FLTK Settings: Garbled Support Matrix + Reset Button
+
+### Bug 67 — Support matrix rendered as garbage text on Windows
+
+**File:** `python/gui_fltk.py`
+
+The BACKEND & PLATFORM support matrix showed `yiOk^B`, `c©Ok^B` etc.
+
+**Root cause:** Three separate `Fl_Box` widgets per row were created inside
+a `_mkcol` helper. pyFLTK stores a pointer to the C string of the label.
+When the Python string passed to `Fl_Box(...)` was a temporary not stored
+in a named variable, it was garbage collected immediately, leaving the widget
+with a dangling pointer that read as garbage bytes on Windows MSVC builds.
+
+**Fix:** Replaced three `Fl_Box` widgets per row with one `Fl_Box` per row
+using a plain concatenated string with `.ljust()` for alignment. Also replaced
+all f-string format specs (`f"{x:<18}"`) with `.ljust()` throughout —
+FLTK on some platforms misinterprets certain byte sequences in format strings.
+
+### Added: "Reset to defaults" button
+
+Appears at the bottom of the Settings tab. Resets all three settings to `True`,
+saves to `settings.json`, and updates the checkboxes visually.
+
+---
+
+## Session 34 — C++ Nuklear GUI: Full Parity with FLTK GUI
+
+### Changes
+
+#### 1. Tab bar: 4 tabs → 3 tabs
+
+Old: `Boot Entries | Platform | Settings | Log`
+New: `Boot Entries | Settings | Log`
+
+Platform tab content (backend name, kind, writable status, support matrix) moved into
+the Settings tab under BACKEND & PLATFORM — identical to the FLTK GUI layout.
+
+#### 2. Settings tab: 3 checkboxes + Reset button
+
+Old: 1 checkbox (confirm dialogs only)
+New: 3 checkboxes:
+- **Confirm before Set Default and Delete** — wired to `confirmOps`
+- **Create backups before writing changes** — wired to `backupOps`
+- **Show technical metadata in entry details** — wired to `showMeta`
+
+**Reset to defaults** button resets all three to `true` and logs the action.
+
+```cpp
+bool confirmOps = true;   // confirm before set-default and delete
+bool backupOps  = true;   // create timestamped backups before writes
+bool showMeta   = true;   // show kernel/uuid/partition in detail
+```
+
+#### 3. Detail panel respects `showMeta` setting
+
+When "Show technical metadata" is unchecked, Kernel, Partition, UUID, and Config
+fields are hidden. Only Name and Type are always shown. Matches FLTK GUI behaviour.
+
+#### 4. Linux one-click build script: `gui-nuklear/build_linux.sh`
+
+- Detects missing SDL2 and auto-installs via `apt`, `dnf`, `pacman`, or `brew`
+- Builds both `blm-backend` and `blm-gui-nuklear` silently
+- Copies both binaries into `run/` with correct permissions
+- Offers to launch in demo mode immediately
+
+```bash
+chmod +x gui-nuklear/build_linux.sh
+./gui-nuklear/build_linux.sh
+./run/blm-gui-nuklear --demo    # test without root
+sudo ./run/blm-gui-nuklear      # real mode
+```
+
+### Test results
+
+```
+Round 1:  65 /  65 passed
+Round 2:  58 /  58 passed
+TOTAL:   123 / 123 passed — ALL PASSED ✓
+```
 
 ---
 
@@ -538,6 +713,7 @@ that range (★, ⚠, 🔒) render as `?`.
 | 64 | 24 | `python/gui_pygame.py` | Click detection fired for off-screen entries when list was scrolled |
 | 65 | 27 | `gui-nuklear/src/main.cpp` | `writable=false` until `backendInfo` callback fires — race caused buttons to be greyed |
 | 66 | 28 | `gui-nuklear/src/main.cpp` | Unicode symbols rendered as `?` by Nuklear's ASCII-only bitmap font |
+| 67 | 33 | `python/gui_fltk.py` | FLTK support matrix showed garbage text on Windows — dangling pointer from temporary Python strings passed to `Fl_Box` |
 
 ---
 
@@ -555,4 +731,4 @@ Latency:     <2ms average per request
 
 ---
 
-*Last updated: 11.06.2026
+*Last updated: 12.06.2026
